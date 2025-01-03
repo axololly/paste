@@ -2,7 +2,6 @@ from __future__ import annotations
 from asqlite import create_pool
 from contextlib import asynccontextmanager
 from fastapi import Request
-from paste.loops import BackgroundLoops
 from paste.create import _create_new_paste
 from paste.delete import _delete_paste_by_link
 from paste.get import _get_paste_by_id, _get_raw_paste_by_id
@@ -10,7 +9,7 @@ from paste.update import _update_existing_paste
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from utils import MyAPI
+from utils import BackgroundLoops, MyAPI
 
 limiter = Limiter(key_func = get_remote_address)
 
