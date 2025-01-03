@@ -1,11 +1,12 @@
+import shortuuid
 from fastapi import Request
 from datetime import datetime as dt, timedelta as td
 from json import JSONDecodeError
-import shortuuid
-from utils import error_400, format_file_size, http_reply, MyAPI, success
+from utils import error_400, format_file_size, http_reply, MyAPI
+from ._types import CountRow, CreateRequest, CreateSuccess, Reply
 from zlib import compress
 
-async def _create_new_paste(app: MyAPI, request: Request):
+async def create_new_paste(app: MyAPI, request: Request) -> CreateSuccess | Reply:
     """
     Create a new paste in the database from a `Request` with a
     JSON document in the format of the following:
@@ -26,7 +27,7 @@ async def _create_new_paste(app: MyAPI, request: Request):
     
     # Get the JSON data from the request
     try:
-        data: dict = await request.json()
+        data: CreateRequest = await request.json()
     except JSONDecodeError:
         return error_400("No JSON was given.")
     
@@ -43,19 +44,19 @@ async def _create_new_paste(app: MyAPI, request: Request):
     # Get how many days the paste should be kept for.
     # If not specified, it defaults to the corresponding
     # attribute on the `Config` class.
-    days_before_expiration = data.pop("keep_for", app.config.DEFAULT_EXPIRATION_IN_DAYS)
+    days_before_expiration: int = data.pop("keep_for", app.config.DEFAULT_EXPIRATION_IN_DAYS) # type: ignore
 
     # Does not match scheme - return 400
     if "files" not in data:
         return error_400("'files' key missing in JSON.")
 
-    files: list[list[str | None, str]] = data["files"]
+    files: list[list[str | None]] = data["files"]
 
     total_paste_size = 0
     
     for i, file in enumerate(files):
         # `file` is not a list
-        if not isinstance(file, list):
+        if not isinstance(file, list): # type: ignore
             return error_400(f"element at index {i} in 'files' list is not a list.")
         
         # `file` does not have two items in it
@@ -66,7 +67,7 @@ async def _create_new_paste(app: MyAPI, request: Request):
         filename, content = file
 
         # `filename` is not a string or `NoneType`
-        if not isinstance(filename, (str, type(None))):
+        if not isinstance(filename, (str, type(None))): # type: ignore
             return error_400(f"first element at index {i} in 'files' is not a string or NoneType equivalent.")
 
         # `content` is not a string
@@ -86,7 +87,7 @@ async def _create_new_paste(app: MyAPI, request: Request):
 
     async with app.pool.acquire() as conn:
         req = await conn.execute("SELECT COUNT(*) AS 'count' FROM pastes")
-        row = await req.fetchone()
+        row: CountRow = await req.fetchone() # type: ignore
         count = row["count"]
     
     # Verify that there's still space available in the database.
@@ -135,7 +136,7 @@ async def _create_new_paste(app: MyAPI, request: Request):
         await conn.executemany(
             "INSERT INTO files (id, filename, content, position) VALUES (?, ?, ?, ?)",
             [
-                (paste_id, filename, compress(content.encode()), position)
+                (paste_id, filename, compress(content.encode()), position) # type: ignore (content is always 'str')
                 for position, (filename, content) in enumerate(files, start = 1)
             ]
         )
@@ -145,7 +146,10 @@ async def _create_new_paste(app: MyAPI, request: Request):
 
     base_url = entire_link.removesuffix(current_scope)
     
-    return success | {
+    return {
+        "status": 200,
+        "message": "Success!",
+
         "paste_id": paste_id,
         "removal_id": removal_id,
         "removal_link": f"{base_url}/delete/{removal_id}"

@@ -1,9 +1,10 @@
 from json import JSONDecodeError
 from fastapi import Request
+from ._types import CreateRequest, Reply
 from utils import error_400, error_404, format_file_size, http_reply, MyAPI, success
 from zlib import compress
 
-async def _update_existing_paste(app: MyAPI, request: Request) -> dict[str, int | str]:
+async def update_existing_paste(app: MyAPI, request: Request) -> Reply:
     """
     Update an existing paste through the JSON of a `request`.
 
@@ -20,7 +21,7 @@ async def _update_existing_paste(app: MyAPI, request: Request) -> dict[str, int 
     """
     
     try:
-        data: dict = await request.json()
+        data: CreateRequest = await request.json()
     
     # No JSON was given.
     except JSONDecodeError:
@@ -30,7 +31,7 @@ async def _update_existing_paste(app: MyAPI, request: Request) -> dict[str, int 
         return error_400("Invalid keys found in JSON.")
 
 
-    if not isinstance(data["id"], str):
+    if not isinstance(data["id"], str): # type: ignore
         return error_400("'id' value is not a string.")
     
     async with app.pool.acquire() as conn:
@@ -41,15 +42,15 @@ async def _update_existing_paste(app: MyAPI, request: Request) -> dict[str, int 
         return error_404(f"No paste was found with the ID '{id}'.")
 
 
-    if not isinstance(data["files"], list):
+    if not isinstance(data["files"], list): # type: ignore
         return error_400("'files' value is not a list.")
 
     total_paste_size = 0
 
-    args_for_database = []
+    args_for_database: list[tuple[str, str, bytes, int]] = []
 
     for i, file in enumerate(data["files"]):
-        if not isinstance(file, list):
+        if not isinstance(file, list): # type: ignore
             return error_400(f"item at index {i} is not a list.")
         
         if len(file) != 2:

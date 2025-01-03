@@ -1,8 +1,9 @@
+from ._types import GetSuccess, Reply
 from typing import overload
-from utils import error_400, error_404, MyAPI, success
+from utils import error_400, error_404, MyAPI
 from zlib import decompress
 
-async def _get_paste_by_id(app: MyAPI, uuid: str):
+async def get_paste_by_id(app: MyAPI, uuid: str) -> GetSuccess | Reply:
     "Retrieve a paste in the database from a given `uuid`."
 
     if len(uuid) < app.config.PASTE_ID_LENGTH:
@@ -15,7 +16,10 @@ async def _get_paste_by_id(app: MyAPI, uuid: str):
     if not rows:
         return error_404(f"No paste was found with the ID '{uuid}'.")
 
-    return success | {
+    return {
+        "status": 200,
+        "message": "Success!",
+
         "files": [
             [row["filename"], decompress(row["content"]).decode()]
             for row in rows
@@ -23,14 +27,14 @@ async def _get_paste_by_id(app: MyAPI, uuid: str):
     }
 
 @overload
-async def _get_raw_paste_by_id(app: MyAPI, uuid: str) -> str:
+async def get_raw_paste_by_id(app: MyAPI, uuid: str) -> str:
     "Get the raw content of a paste by its UUID."
 
 @overload
-async def _get_raw_paste_by_id(app: MyAPI, uuid: str, filepos: int) -> str:
+async def get_raw_paste_by_id(app: MyAPI, uuid: str, filepos: int) -> str:
     "Get the raw content of a specific file in a paste."
 
-async def _get_raw_paste_by_id(app: MyAPI, uuid: str, filepos: int = 0) -> str:
+async def get_raw_paste_by_id(app: MyAPI, uuid: str, filepos: int = 0) -> str:
     r"""
     Works the same as `_get_paste_by_id` but returns content
     as plain text instead of through JSON.

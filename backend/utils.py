@@ -6,20 +6,22 @@ from asyncio import sleep
 from datetime import datetime as dt
 from discord.ext import tasks
 from fastapi import FastAPI
+from paste._types import Reply
 from typing import Awaitable, overload
 from utils import MyAPI
 
 # =================================================================================================
 
-def http_reply(status_code: int, message: str) -> dict[str, int | str]:
+def http_reply(status_code: int, message: str) -> Reply:
     return {
         "status": status_code,
         "message": message or "No message given."
     }
 
-success = http_reply(200, "Success!")
-error_400 = lambda message: http_reply(400, message)
-error_404 = lambda message: http_reply(404, message)
+success: Reply = http_reply(200, "Success!")
+
+def error_400(message: str) -> Reply: return http_reply(400, message)
+def error_404(message: str) -> Reply: return http_reply(404, message)
 
 # =================================================================================================
 
@@ -41,7 +43,7 @@ class Config:
 
 class MyAPI(FastAPI):
     pool: Pool
-    config: Config = Config
+    config: Config = Config()
     loops: BackgroundLoops
 
 # =================================================================================================
@@ -51,25 +53,22 @@ class BackgroundLoops:
         self.app = app
     
     @overload
-    def sleep_until(self, timestamp: int, /) -> Awaitable[None]:
+    def sleep_until(self, timestamp: int | float, /) -> Awaitable[None]:
         "Returns a coroutine to let you sleep until a given `timestamp` is reached."
     
     @overload
     def sleep_until(self, datetime: dt, /) -> Awaitable[None]:
         "Returns a coroutine to let you sleep until a given `datetime` is reached."
 
-    def sleep_until(self, _dt_or_ts: dt | int, /) -> Awaitable[None]:
+    def sleep_until(self, _dt_or_ts: dt | int | float, /) -> Awaitable[None]:
         "Returns a coroutine to let you sleep until a given `datetime` or `timestamp` is reached."
 
         if isinstance(_dt_or_ts, dt):
             time_asleep = _dt_or_ts.timestamp() - dt.now().timestamp()
-        elif isinstance(_dt_or_ts, int):
+        elif isinstance(_dt_or_ts, (int, float)): # type: ignore
             time_asleep = _dt_or_ts - dt.now().timestamp()
         else:
             raise TypeError("given argument is not an integer or datetime object.")
-
-        if time_asleep <= 0:
-            return
         
         return sleep(time_asleep)
 
@@ -98,7 +97,8 @@ class BackgroundLoops:
             row = await req.fetchone()
         
         if not row:
-            self.app.deleting_loop.cancel()
+            self.app.loops.delete_in_background.cancel()
+            return
         
         await self.sleep_until(row["expiration"])
 
@@ -125,3 +125,5 @@ def format_file_size(count: int) -> str:
     for capacity, unit in units.items():
         if count > capacity:
             return f"{count / capacity:.2f} {unit}"
+    
+    raise ValueError("no units dictionary is present.")
