@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 from asqlite import Pool
-from asyncio import sleep
-from datetime import datetime as dt
 from discord.ext import tasks
 from fastapi import FastAPI
-from typing import overload
 
 # =================================================================================================
 
@@ -18,45 +15,31 @@ def http_reply(status_code: int, message: str) -> dict[str, int | str]:
 
 success = http_reply(200, "Success!")
 error_400 = lambda message: http_reply(400, message)
-
-# =================================================================================================
-
-@overload
-async def sleep_until(datetime: dt, /) -> None:
-    "Sleep until a given `datetime`."
-
-@overload
-async def sleep_until(timestamp: int, /) -> None:
-    "Sleep until a given timestamp."
-
-async def sleep_until(_dt_or_ts: dt | int, /) -> None:
-    if isinstance(_dt_or_ts, dt):
-        time_asleep = _dt_or_ts.timestamp() - dt.now().timestamp()
-    elif isinstance(_dt_or_ts, int):
-        time_asleep = _dt_or_ts - dt.now().timestamp()
-    else:
-        raise TypeError("given argument is not an integer or datetime object.")
-
-    if time_asleep <= 0:
-        return
-    
-    await sleep(time_asleep)
+error_404 = lambda message: http_reply(404, message)
 
 # =================================================================================================
 
 class Config:
-    MAX_ENTRIES: int = 100_000
+    MAX_ENTRIES = 100_000
     "A constant for the maximum number of entries the database should be able to take."
 
-    MAX_FILE_SIZE: int = 100_000
+    MAX_PASTE_SIZE = 100_000
     "A constant for the maximum number of bytes each paste should have in total."
 
-    DEFAULT_EXPIRATION_IN_DAYS: int = 1
+    DEFAULT_EXPIRATION_IN_DAYS = 1
     "A constant for the number of days to keep a paste, by default."
+
+    PASTE_ID_LENGTH = 10
+    "A constant for how long paste IDs in the database should be."
+
+    REMOVAL_ID_LENGTH = 22
+    "A constant for how long removal IDs in the database should be."
 
 class BackgroundLoops:
     app: MyAPI
     delete_in_background: tasks.Loop
+    
+    def start(self) -> None: ...
 
 class MyAPI(FastAPI):
     pool: Pool

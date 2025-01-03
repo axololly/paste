@@ -33,8 +33,8 @@ async def _create_new_paste(app: MyAPI, request: Request):
     # Optional JSON key
     if "keep_for" in data:
         # Not an integer - return 400
-        if not isinstance(data["keep_for"], int):
-            return error_400("'keep_for' key is not an integer.")
+        if not isinstance(data["keep_for"], (int, float)):
+            return error_400("'keep_for' value is not an integer or decimal.")
         
         # Not in range 1-30 inclusive - return 400
         if not 1 <= data["keep_for"] <= 30:
@@ -51,7 +51,7 @@ async def _create_new_paste(app: MyAPI, request: Request):
 
     files: list[list[str | None, str]] = data["files"]
 
-    total_file_size = 0
+    total_paste_size = 0
     
     for i, file in enumerate(files):
         # `file` is not a list
@@ -72,13 +72,16 @@ async def _create_new_paste(app: MyAPI, request: Request):
         # `content` is not a string
         if not isinstance(content, str):
             return error_400(f"second element at index {i} in 'files' is not a string.")
+        
+        if not content:
+            return error_400(f"second element at index {i} in 'files' is an empty string.")
 
-        total_file_size += len(content)
+        total_paste_size += len(content)
 
         # If the file size exceeds what is required, return
         # a 422 (Unprocessable Entity) HTTP status code.
-        if total_file_size > app.config.MAX_FILE_SIZE:
-            return http_reply(422, f"Combined file size after file {i} exceeds maximum limit of {format_file_size(app.config.MAX_FILE_SIZE)} by {format_file_size(total_file_size - app.config.MAX_FILE_SIZE)}")
+        if total_paste_size > app.config.MAX_PASTE_SIZE:
+            return http_reply(422, f"Combined file size after file {i} exceeds maximum limit of {format_file_size(app.config.MAX_PASTE_SIZE)} by {format_file_size(total_paste_size - app.config.MAX_PASTE_SIZE)}")
     
 
     async with app.pool.acquire() as conn:
@@ -109,8 +112,15 @@ async def _create_new_paste(app: MyAPI, request: Request):
                     return next_uuid
     
 
-    paste_id   = await get_unique_uuid(length = 10, column = "id")
-    removal_id = await get_unique_uuid(length = 22, column = "removal_id")
+    paste_id = await get_unique_uuid(
+        length = app.config.PASTE_ID_LENGTH,
+        column = "id"
+    )
+    
+    removal_id = await get_unique_uuid(
+        length = app.config.REMOVAL_ID_LENGTH,
+        column = "removal_id"
+    )
 
     expiration = int((dt.now() + td(days = days_before_expiration)).timestamp())
 
@@ -123,10 +133,10 @@ async def _create_new_paste(app: MyAPI, request: Request):
 
         # Add all the file data to the `files` table
         await conn.executemany(
-            "INSERT INTO files (id, filename, content) VALUES (?, ?, ?)",
+            "INSERT INTO files (id, filename, content, position) VALUES (?, ?, ?, ?)",
             [
-                (paste_id, filename, compress(content.encode()))
-                for filename, content in files
+                (paste_id, filename, compress(content.encode()), position)
+                for position, (filename, content) in enumerate(files, start = 1)
             ]
         )
     
