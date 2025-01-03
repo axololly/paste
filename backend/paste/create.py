@@ -1,95 +1,142 @@
+from fastapi import Request
 from datetime import datetime as dt, timedelta as td
-from fastapi import FastAPI, Request
 from json import JSONDecodeError
-from ..utils import error_400, http_reply, PasteCodes, success
+import shortuuid
+from utils import error_400, format_file_size, http_reply, MyAPI, success
 from zlib import compress
 
-async def _create_new_paste(app: FastAPI, request: Request) -> dict[str, int | str]:
+async def _create_new_paste(app: MyAPI, request: Request):
+    """
+    Create a new paste in the database from a `Request` with a
+    JSON document in the format of the following:
+
+    ```json
+    {
+      "files": [
+        // [filename, content],
+        // ...
+      ],
+      "keep_for": // number of days between 1 and 30
+    }
+    ```
+
+    Any other keys in the JSON that are not relevant to the
+    operation are discared.
+    """
+    
+    # Get the JSON data from the request
     try:
         data: dict = await request.json()
-    
-    # No JSON was given.
     except JSONDecodeError:
         return error_400("No JSON was given.")
-
-    if "files" not in data:
-        return error_400("No 'files' key found in JSON.")
     
+    # Optional JSON key
+    if "keep_for" in data:
+        # Not an integer - return 400
+        if not isinstance(data["keep_for"], int):
+            return error_400("'keep_for' key is not an integer.")
+        
+        # Not in range 1-30 inclusive - return 400
+        if not 1 <= data["keep_for"] <= 30:
+            return error_400("'keep_for' is not in range 1-30 inclusive.")
+    
+    # Get how many days the paste should be kept for.
+    # If not specified, it defaults to the corresponding
+    # attribute on the `Config` class.
+    days_before_expiration = data.pop("keep_for", app.config.DEFAULT_EXPIRATION_IN_DAYS)
+
+    # Does not match scheme - return 400
+    if "files" not in data:
+        return error_400("'files' key missing in JSON.")
+
     files: list[list[str | None, str]] = data["files"]
 
-    if not files:
-        return error_400("'files' key is an empty list.")
-
-    async with app.pool.acquire() as conn:
-        req = await conn.execute('SELECT COUNT(*) FROM pastes AS "count"')
-        row = await req.fetchone()
-        
-    database_id = row["count"] + 1
-
-    if database_id == len(PasteCodes.valid_chars) ** PasteCodes.ID_LENGTH:
-        return http_reply(
-            403,
-            "No more pastes can be created at this given time. "
-            "Notify the owner to increase this limit."
-        )
+    total_file_size = 0
     
-    display_id = PasteCodes.from_int(database_id, length = PasteCodes.ID_LENGTH)
-
-    if not isinstance(files, list):
-        return error_400("'files' key is not mapped to a list.")
-    
-    args_for_database: list[tuple[int, str | None, bytes]] = []
-
-    for pos, file in enumerate(files):
+    for i, file in enumerate(files):
+        # `file` is not a list
         if not isinstance(file, list):
-            return error_400(f"datatype at pos {pos} is not a list.")
-
-        if len(file) != 2:
-            return error_400(f"invalid length {len(file)} of inner list at pos {pos}.")
+            return error_400(f"element at index {i} in 'files' list is not a list.")
         
+        # `file` does not have two items in it
+        if len(file) != 2:
+            return error_400(f"element at index {i} in 'files' has more or less than 2 items inside.")
+
+        # Deconstruct for easier management
         filename, content = file
 
+        # `filename` is not a string or `NoneType`
         if not isinstance(filename, (str, type(None))):
-            return error_400(f"type of first element at pos {pos} is not a string or None.")
+            return error_400(f"first element at index {i} in 'files' is not a string or NoneType equivalent.")
 
+        # `content` is not a string
         if not isinstance(content, str):
-            return error_400(f"type of second element at pos {pos} is not a string.")
-        
-        # Check that the data is within 5MB in size
-        # x << 20 is the same as x * 1024 * 1024
-        if len(content) > (5 << 20):
-            return http_reply(403, f"Cannot store entries of over 5MB: the given file was {len(content) / (1024**2):,.2f} GB in size.")
-        
-        args_for_database.append((database_id, filename, compress(content)))
+            return error_400(f"second element at index {i} in 'files' is not a string.")
 
-    if "keep_for" in data:
-        days_before_delete = data["keep_for"]
+        total_file_size += len(content)
 
-        if not isinstance(days_before_delete, int):
-            return error_400("'keep_for' argument is not an integer.")
-        
-        if not 1 <= days_before_delete <= 30:
-            return error_400("'keep_for' argument is not between 1 and 30 (inclusive).")
-
-        delete_timestamp = int(dt.now() + td(days = days_before_delete))
+        # If the file size exceeds what is required, return
+        # a 422 (Unprocessable Entity) HTTP status code.
+        if total_file_size > app.config.MAX_FILE_SIZE:
+            return http_reply(422, f"Combined file size after file {i} exceeds maximum limit of {format_file_size(app.config.MAX_FILE_SIZE)} by {format_file_size(total_file_size - app.config.MAX_FILE_SIZE)}")
     
-    else:
-        # Keep data for 7 days before deleting
-        delete_timestamp = int(dt.now() + td(days = 7))
 
     async with app.pool.acquire() as conn:
-        # Insert the compressed data into the database to save space
-        await conn.executemany(
-            "INSERT INTO pastes (id, filename, content) VALUES (?, ?, ?)",
-            args_for_database
-        )
+        req = await conn.execute("SELECT COUNT(*) AS 'count' FROM pastes")
+        row = await req.fetchone()
+        count = row["count"]
+    
+    # Verify that there's still space available in the database.
+    # If there isn't, return a 403 notifying the user.
+    if count == app.config.MAX_ENTRIES:
+        return http_reply(403, "System is full. Please try again later.")
 
-        # Insert a row for when to delete the entry
+
+    async def get_unique_uuid(*, length: int, column: str) -> str:
+        "Get a new UUID with length `length` that hasn't appeared in the `column` column of the database."
+
+        async with app.pool.acquire() as conn:
+            while True:
+                # Generate a new ID
+                next_uuid = shortuuid.random(length)
+
+                # Check it doesn't already exist
+                req = await conn.execute(f"SELECT 1 FROM pastes WHERE {column} = ?", next_uuid)
+                row = await req.fetchone()
+
+                # Unique ID is found
+                if not row:
+                    return next_uuid
+    
+
+    paste_id   = await get_unique_uuid(length = 10, column = "id")
+    removal_id = await get_unique_uuid(length = 22, column = "removal_id")
+
+    expiration = int((dt.now() + td(days = days_before_expiration)).timestamp())
+
+    async with app.pool.acquire() as conn:
+        # Add to the `pastes` table
         await conn.execute(
-            "INSERT INTO expiries (id, expiry_timestamp) VALUES (?, ?)",
-            database_id, delete_timestamp
+            "INSERT INTO pastes (id, expiration, removal_id) VALUES (?, ?, ?)",
+            paste_id, expiration, removal_id
         )
 
+        # Add all the file data to the `files` table
+        await conn.executemany(
+            "INSERT INTO files (id, filename, content) VALUES (?, ?, ?)",
+            [
+                (paste_id, filename, compress(content.encode()))
+                for filename, content in files
+            ]
+        )
+    
+    entire_link = str(request.url)
+    current_scope = request.url.path
+
+    base_url = entire_link.removesuffix(current_scope)
+    
     return success | {
-        "paste_id": display_id
+        "paste_id": paste_id,
+        "removal_id": removal_id,
+        "removal_link": f"{base_url}/delete/{removal_id}"
     }

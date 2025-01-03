@@ -1,9 +1,10 @@
-from fastapi import FastAPI, Request
+from fastapi import Request
 from json import JSONDecodeError
-from ..utils import error_400, http_reply, PasteCodes, success
+import shortuuid
+from utils import error_400, http_reply, MyAPI, success
 from zlib import decompress
 
-async def _get_paste_by_id(app: FastAPI, request: Request):
+async def _get_paste_by_id(app: MyAPI, request: Request):
     try:
         data: dict = await request.json()
     except JSONDecodeError:
@@ -14,21 +15,16 @@ async def _get_paste_by_id(app: FastAPI, request: Request):
 
     if not isinstance(data["id"], str):
         return error_400("'id' key is not a string.")
-    
-    id = PasteCodes.from_str(data["id"])
-
-    if not id:
-        return error_400(
-            "'id' contains invalid characters. "
-           f"Valid character set is: {ascii(PasteCodes.valid_chars)}"
-        )
 
     async with app.pool.acquire() as conn:
-        req = await conn.execute("SELECT filename, content FROM pastes WHERE id = ?", id)
+        req = await conn.execute(
+            "SELECT filename, content FROM files WHERE id = ?",
+            data["id"]
+        )
         rows = await req.fetchall()
     
     if not rows:
-        return http_reply(404, f"No entry was found by the ID '{id}'.")
+        return http_reply(404, f"No paste was found with the ID '{ascii(data["id"])}'.")
 
     return success | {
         "files": [
