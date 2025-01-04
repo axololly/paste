@@ -30,13 +30,13 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler) # type: ignore
 
 
-@app.post("/create/")
+@app.post("/create/", response_model = None)
 @limiter.limit("6/minute") # type: ignore # 10s per request
 async def app_create_new_paste(request: Request) -> CreateSuccess | Reply:
     return await create_new_paste(app, request)
 
 
-@app.get("/get/{paste_id}")
+@app.get("/get/{paste_id}", response_model = None)
 @limiter.limit("20/minute") # type: ignore # 3s per request
 async def app_get_paste_by_id(request: Request, paste_id: str) -> GetSuccess | Reply:
     return await get_paste_by_id(app, paste_id)
@@ -64,12 +64,12 @@ async def app_update_existing_paste(request: Request) -> Reply:
     return await update_existing_paste(app, request)
 
 
-@app.get("/download/{paste_id}")
+@app.get("/download/{paste_id}", response_model = None)
 @limiter.limit("2/minute") # type: ignore
 async def app_download_paste_by_id(request: Request, paste_id: str) -> StreamingResponse | Reply:
     return await download_paste_by_id(app, paste_id)
 
-@app.get("/download/{paste_id}/{filepos}")
+@app.get("/download/{paste_id}/{filepos}", response_model = None)
 @limiter.limit("2/minute") # type: ignore
 async def app_download_single_paste_by_id(request: Request, paste_id: str, filepos: int) -> StreamingResponse | Reply:
     return await download_paste_by_id(app, paste_id, filepos)
