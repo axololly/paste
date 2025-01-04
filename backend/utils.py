@@ -1,12 +1,11 @@
 "A helper module to provide helper functions."
 
-# from __future__ import annotations
 from asqlite import Pool
 from asyncio import sleep
 from datetime import datetime as dt
 from discord.ext import tasks
-from fastapi import FastAPI
 from paste._types import Reply, Success
+from sanic import Sanic
 from typing import overload
 
 # =================================================================================================
@@ -28,7 +27,7 @@ class Config:
     MAX_ENTRIES = 100_000
     "A constant for the maximum number of entries the database should be able to take."
 
-    MAX_PASTE_SIZE = 100_000
+    MAX_PASTE_SIZE = 100_000 # 100 KB
     "A constant for the maximum number of bytes each paste should have in total."
 
     DEFAULT_EXPIRATION_IN_DAYS = 1
@@ -40,10 +39,13 @@ class Config:
     REMOVAL_ID_LENGTH = 22
     "A constant for how long removal IDs in the database should be."
 
-class MyAPI(FastAPI):
+class APIContext:
     pool: Pool
-    config: Config = Config()
+    configs: Config = Config()
     loops: 'BackgroundLoops'
+
+class MyAPI(Sanic):
+    ctx: APIContext
 
 # =================================================================================================
 
@@ -78,6 +80,13 @@ class BackgroundLoops:
             if isinstance(attr_value, tasks.Loop):
                 attr_value.start()
     
+    def end(self) -> None:
+        "Cancel all loops attached to this instance."
+
+        for attr_value in self.__dict__.values():
+            if isinstance(attr_value, tasks.Loop):
+                attr_value.cancel()
+    
     @tasks.loop(seconds = 1)
     async def delete_in_background(self) -> None:
         """
@@ -85,7 +94,7 @@ class BackgroundLoops:
         be deleted and then delete it.
         """
 
-        async with self.app.pool.acquire() as conn:
+        async with self.app.ctx.pool.acquire() as conn:
             req = await conn.execute(
                 """
                 SELECT id, expiration FROM pastes
@@ -96,12 +105,12 @@ class BackgroundLoops:
             row = await req.fetchone()
         
         if not row:
-            self.app.loops.delete_in_background.cancel()
+            self.app.ctx.loops.delete_in_background.cancel()
             return
         
         await self.sleep_until(row["expiration"])
 
-        async with self.app.pool.acquire() as conn:
+        async with self.app.ctx.pool.acquire() as conn:
             await conn.execute("DELETE FROM pastes WHERE id = ?", row["id"])
 
 # =================================================================================================

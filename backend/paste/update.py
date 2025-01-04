@@ -1,5 +1,5 @@
 from json import JSONDecodeError
-from fastapi import Request
+from sanic.request import Request
 from ._types import UpdateRequest, Reply
 from utils import error_400, error_404, format_file_size, http_reply, MyAPI, success
 from zlib import compress
@@ -21,7 +21,7 @@ async def update_existing_paste(app: MyAPI, request: Request) -> Reply:
     """
     
     try:
-        data: UpdateRequest = await request.json()
+        data: UpdateRequest = request.json
     
     # No JSON was given.
     except JSONDecodeError:
@@ -34,7 +34,7 @@ async def update_existing_paste(app: MyAPI, request: Request) -> Reply:
     if not isinstance(data["id"], str): # type: ignore
         return error_400("'id' value is not a string.")
     
-    async with app.pool.acquire() as conn:
+    async with app.ctx.pool.acquire() as conn:
         req = await conn.execute("SELECT expiration, removal_id FROM pastes WHERE id = ?", data["id"])
         paste_data_row = await req.fetchone()
     
@@ -66,8 +66,8 @@ async def update_existing_paste(app: MyAPI, request: Request) -> Reply:
         
         total_paste_size += len(content)
 
-        if total_paste_size > app.config.MAX_PASTE_SIZE:
-            return http_reply(422, f"Combined file size after file {i} exceeds maximum limit of {format_file_size(app.config.MAX_PASTE_SIZE)} by {format_file_size(total_paste_size - app.config.MAX_PASTE_SIZE)}")
+        if total_paste_size > app.ctx.configs.MAX_PASTE_SIZE:
+            return http_reply(422, f"Combined file size after file {i} exceeds maximum limit of {format_file_size(app.ctx.configs.MAX_PASTE_SIZE)} by {format_file_size(total_paste_size - app.ctx.configs.MAX_PASTE_SIZE)}")
         
         args_for_database.append((
             data["id"],
@@ -77,7 +77,7 @@ async def update_existing_paste(app: MyAPI, request: Request) -> Reply:
         ))
 
 
-    async with app.pool.acquire() as conn:
+    async with app.ctx.pool.acquire() as conn:
         # Delete the existing files
         await conn.execute("DELETE FROM files WHERE id = ?", data["id"])
 

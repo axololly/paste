@@ -1,8 +1,7 @@
 import shortuuid
-from fastapi import Request
 from datetime import datetime as dt, timedelta as td
 from json import JSONDecodeError
-# from pydantic.fields import FieldInfo
+from sanic.request import Request
 from ._types import CountRow, CreateRequest, CreateSuccess, Reply
 from utils import error_400, format_file_size, http_reply, MyAPI
 from zlib import compress
@@ -31,7 +30,7 @@ async def create_new_paste(
     
     # Get the JSON data from the request
     try:
-        data: CreateRequest = await request.json()
+        data: CreateRequest = request.json
     except JSONDecodeError:
         return error_400("No JSON was given.")
     
@@ -48,7 +47,7 @@ async def create_new_paste(
     # Get how many days the paste should be kept for.
     # If not specified, it defaults to the corresponding
     # attribute on the `Config` class.
-    days_before_expiration: int = data.pop("keep_for", app.config.DEFAULT_EXPIRATION_IN_DAYS) # type: ignore
+    days_before_expiration: int = data.pop("keep_for", app.ctx.configs.DEFAULT_EXPIRATION_IN_DAYS) # type: ignore
 
     # Does not match scheme - return 400
     if "files" not in data:
@@ -85,25 +84,25 @@ async def create_new_paste(
 
         # If the file size exceeds what is required, return
         # a 422 (Unprocessable Entity) HTTP status code.
-        if total_paste_size > app.config.MAX_PASTE_SIZE:
-            return http_reply(422, f"Combined file size after file {i} exceeds maximum limit of {format_file_size(app.config.MAX_PASTE_SIZE)} by {format_file_size(total_paste_size - app.config.MAX_PASTE_SIZE)}")
+        if total_paste_size > app.ctx.configs.MAX_PASTE_SIZE:
+            return http_reply(422, f"Combined file size after file {i} exceeds maximum limit of {format_file_size(app.ctx.configs.MAX_PASTE_SIZE)} by {format_file_size(total_paste_size - app.ctx.configs.MAX_PASTE_SIZE)}")
     
 
-    async with app.pool.acquire() as conn:
+    async with app.ctx.pool.acquire() as conn:
         req = await conn.execute("SELECT COUNT(*) AS 'count' FROM pastes")
         row: CountRow = await req.fetchone() # type: ignore
         count = row["count"]
     
     # Verify that there's still space available in the database.
     # If there isn't, return a 403 notifying the user.
-    if count == app.config.MAX_ENTRIES:
+    if count == app.ctx.configs.MAX_ENTRIES:
         return http_reply(403, "System is full. Please try again later.")
 
 
     async def get_unique_uuid(*, length: int, column: str) -> str:
         "Get a new UUID with length `length` that hasn't appeared in the `column` column of the database."
 
-        async with app.pool.acquire() as conn:
+        async with app.ctx.pool.acquire() as conn:
             while True:
                 # Generate a new ID
                 next_uuid = shortuuid.random(length)
@@ -118,18 +117,18 @@ async def create_new_paste(
     
 
     paste_id = await get_unique_uuid(
-        length = app.config.PASTE_ID_LENGTH,
+        length = app.ctx.configs.PASTE_ID_LENGTH,
         column = "id"
     )
     
     removal_id = await get_unique_uuid(
-        length = app.config.REMOVAL_ID_LENGTH,
+        length = app.ctx.configs.REMOVAL_ID_LENGTH,
         column = "removal_id"
     )
 
     expiration = int((dt.now() + td(days = days_before_expiration)).timestamp())
 
-    async with app.pool.acquire() as conn:
+    async with app.ctx.pool.acquire() as conn:
         # Add to the `pastes` table
         await conn.execute(
             "INSERT INTO pastes (id, expiration, removal_id) VALUES (?, ?, ?)",
@@ -145,8 +144,8 @@ async def create_new_paste(
             ]
         )
     
-    entire_link = str(request.url)
-    current_scope = request.url.path
+    entire_link = request.url
+    current_scope = request.uri_template or ""
 
     base_url = entire_link.removesuffix(current_scope)
     
