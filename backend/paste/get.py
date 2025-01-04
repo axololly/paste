@@ -16,15 +16,12 @@ async def get_paste_by_id(app: MyAPI, uuid: str) -> GetSuccess | Reply:
     if not rows:
         return error_404(f"No paste was found with the ID '{uuid}'.")
 
-    return {
-        "status": 200,
-        "message": "Success!",
-
-        "files": [
-            [row["filename"], decompress(row["content"]).decode()]
+    return GetSuccess(
+        files = [
+            (row["filename"], decompress(row["content"]).decode())
             for row in rows
         ]
-    }
+    )
 
 @overload
 async def get_raw_paste_by_id(app: MyAPI, uuid: str) -> str:

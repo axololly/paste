@@ -1,6 +1,6 @@
 from json import JSONDecodeError
 from fastapi import Request
-from ._types import CreateRequest, Reply
+from ._types import UpdateRequest, Reply
 from utils import error_400, error_404, format_file_size, http_reply, MyAPI, success
 from zlib import compress
 
@@ -21,7 +21,7 @@ async def update_existing_paste(app: MyAPI, request: Request) -> Reply:
     """
     
     try:
-        data: CreateRequest = await request.json()
+        data: UpdateRequest = await request.json()
     
     # No JSON was given.
     except JSONDecodeError:
@@ -39,7 +39,7 @@ async def update_existing_paste(app: MyAPI, request: Request) -> Reply:
         paste_data_row = await req.fetchone()
     
     if not paste_data_row:
-        return error_404(f"No paste was found with the ID '{id}'.")
+        return error_404(f"No paste was found with the ID '{data["id"]}'.")
 
 
     if not isinstance(data["files"], list): # type: ignore
@@ -61,7 +61,7 @@ async def update_existing_paste(app: MyAPI, request: Request) -> Reply:
         if not isinstance(filename, str):
             return error_400(f"item 0 at index {i} is not a string.")
         
-        if not isinstance(content, str):
+        if not isinstance(content, str): # type: ignore
             return error_400(f"item 1 at index {i} is not a string.")
         
         total_paste_size += len(content)

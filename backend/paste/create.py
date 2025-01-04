@@ -2,11 +2,15 @@ import shortuuid
 from fastapi import Request
 from datetime import datetime as dt, timedelta as td
 from json import JSONDecodeError
-from utils import error_400, format_file_size, http_reply, MyAPI
+# from pydantic.fields import FieldInfo
 from ._types import CountRow, CreateRequest, CreateSuccess, Reply
+from utils import error_400, format_file_size, http_reply, MyAPI
 from zlib import compress
 
-async def create_new_paste(app: MyAPI, request: Request) -> CreateSuccess | Reply:
+async def create_new_paste(
+    app: MyAPI,
+    request: Request
+) -> CreateSuccess | Reply:
     """
     Create a new paste in the database from a `Request` with a
     JSON document in the format of the following:
@@ -50,7 +54,7 @@ async def create_new_paste(app: MyAPI, request: Request) -> CreateSuccess | Repl
     if "files" not in data:
         return error_400("'files' key missing in JSON.")
 
-    files: list[list[str | None]] = data["files"]
+    files: list[tuple[str | None, str]] = data["files"]
 
     total_paste_size = 0
     
@@ -71,7 +75,7 @@ async def create_new_paste(app: MyAPI, request: Request) -> CreateSuccess | Repl
             return error_400(f"first element at index {i} in 'files' is not a string or NoneType equivalent.")
 
         # `content` is not a string
-        if not isinstance(content, str):
+        if not isinstance(content, str): # type: ignore
             return error_400(f"second element at index {i} in 'files' is not a string.")
         
         if not content:
@@ -146,11 +150,8 @@ async def create_new_paste(app: MyAPI, request: Request) -> CreateSuccess | Repl
 
     base_url = entire_link.removesuffix(current_scope)
     
-    return {
-        "status": 200,
-        "message": "Success!",
-
-        "paste_id": paste_id,
-        "removal_id": removal_id,
-        "removal_link": f"{base_url}/delete/{removal_id}"
-    }
+    return CreateSuccess(
+        paste_id = paste_id,
+        removal_id = removal_id,
+        removal_link = f"{base_url}/delete/{removal_id}"
+    )
