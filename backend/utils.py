@@ -1,24 +1,23 @@
 "A helper module to provide helper functions."
 
-from __future__ import annotations
+# from __future__ import annotations
 from asqlite import Pool
 from asyncio import sleep
 from datetime import datetime as dt
 from discord.ext import tasks
 from fastapi import FastAPI
-from paste._types import Reply
-from typing import Awaitable, overload
-from utils import MyAPI
+from paste._types import Reply, Success
+from typing import overload
 
 # =================================================================================================
 
 def http_reply(status_code: int, message: str) -> Reply:
-    return {
-        "status": status_code,
-        "message": message or "No message given."
-    }
+    return Reply(
+        status = status_code,
+        message = message or "No message given."
+    )
 
-success: Reply = http_reply(200, "Success!")
+success: Success = Success()
 
 def error_400(message: str) -> Reply: return http_reply(400, message)
 def error_404(message: str) -> Reply: return http_reply(404, message)
@@ -44,7 +43,7 @@ class Config:
 class MyAPI(FastAPI):
     pool: Pool
     config: Config = Config()
-    loops: BackgroundLoops
+    loops: 'BackgroundLoops'
 
 # =================================================================================================
 
@@ -53,14 +52,14 @@ class BackgroundLoops:
         self.app = app
     
     @overload
-    def sleep_until(self, timestamp: int | float, /) -> Awaitable[None]:
+    async def sleep_until(self, timestamp: int | float, /) -> None:
         "Returns a coroutine to let you sleep until a given `timestamp` is reached."
     
     @overload
-    def sleep_until(self, datetime: dt, /) -> Awaitable[None]:
+    async def sleep_until(self, datetime: dt, /) -> None:
         "Returns a coroutine to let you sleep until a given `datetime` is reached."
 
-    def sleep_until(self, _dt_or_ts: dt | int | float, /) -> Awaitable[None]:
+    async def sleep_until(self, _dt_or_ts: dt | int | float, /) -> None:
         "Returns a coroutine to let you sleep until a given `datetime` or `timestamp` is reached."
 
         if isinstance(_dt_or_ts, dt):
@@ -70,7 +69,7 @@ class BackgroundLoops:
         else:
             raise TypeError("given argument is not an integer or datetime object.")
         
-        return sleep(time_asleep)
+        await sleep(time_asleep)
 
     def start(self) -> None:
         "Start all loops attached to this instance."
