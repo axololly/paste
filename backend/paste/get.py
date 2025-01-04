@@ -6,10 +6,10 @@ from zlib import decompress
 async def get_paste_by_id(app: MyAPI, uuid: str) -> GetSuccess | Reply:
     "Retrieve a paste in the database from a given `uuid`."
 
-    if len(uuid) < app.config.PASTE_ID_LENGTH:
+    if len(uuid) < app.ctx.configs.PASTE_ID_LENGTH:
         return error_400("Invalid UUID.")
 
-    async with app.pool.acquire() as conn:
+    async with app.ctx.pool.acquire() as conn:
         req = await conn.execute("SELECT filename, content FROM files WHERE id = ?", uuid)
         rows = await req.fetchall()
     
@@ -62,28 +62,29 @@ async def get_raw_paste_by_id(app: MyAPI, uuid: str, filepos: int = 0) -> str:
     ```
     """
    
-    if len(uuid) < app.config.PASTE_ID_LENGTH:
+    if len(uuid) < app.ctx.configs.PASTE_ID_LENGTH:
        return "400: Invalid UUID."
    
     if filepos < 0:
         return "400: Invalid file position."
 
-    if not filepos: # Not specified - get all files
-        async with app.pool.acquire() as conn:
+    # Not specified - get all files
+    if not filepos:
+        async with app.ctx.pool.acquire() as conn:
             req = await conn.execute("SELECT filename, content FROM files WHERE id = ?", uuid)
             rows = await req.fetchall()
         
         if not rows:
             return "404: Resource not found."
 
-        return '\n\n***\n\n***'.join(
-            f"[{i}. {row["filename"] or "???"}]" '\n'
-            f"{decompress(row["content"]).decode()}"
+        return '\n\n***\n\n***'.join(                   # Separator
+            f"[{i}. {row["filename"] or "???"}]" '\n'   # Header
+            f"{decompress(row["content"]).decode()}"    # Text
             for i, row in enumerate(rows, start = 1)
         )
     
     # Specified - get specified file
-    async with app.pool.acquire() as conn:
+    async with app.ctx.pool.acquire() as conn:
         req = await conn.execute(
             """
             SELECT filename, content FROM files
