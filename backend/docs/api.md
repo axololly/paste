@@ -79,7 +79,7 @@ requests.get(".../get/8xV3y38NbY")
 
 ## Getting a (raw) paste
 
-Raw pastes are retrieved by sending a `GET` request to the `/get/raw/` endpoint, in one of two ways.
+Raw pastes are retrieved by sending a `GET` request to the `/raw/` endpoint, in one of two ways.
 
 The first is attaching just the relevant paste ID to the end. This will retrieve _all_ files in that paste, adding the filename as a header and separating them by the following: `"\n\n***\n\n"`:
 ```yml
@@ -102,7 +102,7 @@ Code:
 ```py
 import requests
 
-requests.get(".../get/raw/8xV3y38NbY")
+requests.get(".../raw/8xV3y38NbY")
 ```
 
 ### Demonstration 2
@@ -111,7 +111,7 @@ Code:
 ```py
 import requests
 
-requests.get(".../get/raw/8xV3y38NbY/1")
+requests.get(".../raw/8xV3y38NbY/1")
 ```
 
 This gets the first file in the multi-file paste.

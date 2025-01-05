@@ -1,90 +1,69 @@
-from json import JSONDecodeError
-from sanic.request import Request
-from ._types import UpdateRequest, Reply
-from utils import error_400, error_404, format_file_size, http_reply, MyAPI, success
+from sanic.exceptions import NotFound, SanicException
+from ._types import UpdateRequest
+from utils import format_file_size, MyAPI
 from zlib import compress
 
-async def update_existing_paste(app: MyAPI, request: Request) -> Reply:
+async def update_existing_paste(app: MyAPI, data: UpdateRequest) -> None:
     """
-    Update an existing paste through the JSON of a `request`.
+    Update an existing paste in the database.
 
-    This does not refresh the time before deletion.
+    This uses a similar JSON document structure
+    to the `/create/` endpoint, providing
+    intuitive usage.
 
-    Format
+    Parameters
+    ----------
+    app: `MyAPI`
+        the app currently running.
+    data: `UpdateRequest`
+        the data relevant to the operation.
+    
+    Raises
     ------
-    ```json
-    {
-        "id": // The UUID required
-        "files": // The new content to add - list[list[int, str]]
-    }
-    ```
+    `BadRequest`
+        some arguments were invalid.
+    `NotFound`
+        the given paste ID could not
+        be found in the database.
     """
-    
-    try:
-        data: UpdateRequest = request.json
-    
-    # No JSON was given.
-    except JSONDecodeError:
-        return error_400("No JSON was given.")
-
-    if set(data.keys()) != {"id", "files"}:
-        return error_400("Invalid keys found in JSON.")
-
-
-    if not isinstance(data["id"], str): # type: ignore
-        return error_400("'id' value is not a string.")
     
     async with app.ctx.pool.acquire() as conn:
-        req = await conn.execute("SELECT expiration, removal_id FROM pastes WHERE id = ?", data["id"])
+        req = await conn.execute("SELECT expiration, removal_id FROM pastes WHERE id = ?", data.id)
         paste_data_row = await req.fetchone()
     
     if not paste_data_row:
-        return error_404(f"No paste was found with the ID '{data["id"]}'.")
+        raise NotFound(f"No paste was found with the ID '{data.id}'.")
 
-
-    if not isinstance(data["files"], list): # type: ignore
-        return error_400("'files' value is not a list.")
-
+    args_for_database: list[tuple[str, str | None, bytes, int]] = []
     total_paste_size = 0
 
-    args_for_database: list[tuple[str, str, bytes, int]] = []
-
-    for i, file in enumerate(data["files"]):
-        if not isinstance(file, list): # type: ignore
-            return error_400(f"item at index {i} is not a list.")
-        
-        if len(file) != 2:
-            return error_400(f"item at index {i} does not contain two items.")
-
-        filename, content = file
-
-        if not isinstance(filename, str):
-            return error_400(f"item 0 at index {i} is not a string.")
-        
-        if not isinstance(content, str): # type: ignore
-            return error_400(f"item 1 at index {i} is not a string.")
-        
+    for i, (filename, content) in enumerate(data.files):
         total_paste_size += len(content)
 
+        # If the paste size exceeds what is required, return
+        # a 422 (Unprocessable Entity) HTTP status code.
         if total_paste_size > app.ctx.configs.MAX_PASTE_SIZE:
-            return http_reply(422, f"Combined file size after file {i} exceeds maximum limit of {format_file_size(app.ctx.configs.MAX_PASTE_SIZE)} by {format_file_size(total_paste_size - app.ctx.configs.MAX_PASTE_SIZE)}")
+            raise SanicException(
+                f"Combined file size after file {i} exceeds maximum limit "
+                f"of {format_file_size(app.ctx.configs.MAX_PASTE_SIZE)} by"
+                f" {format_file_size(total_paste_size - app.ctx.configs.MAX_PASTE_SIZE)}",
+                
+                422
+            )
         
         args_for_database.append((
-            data["id"],
+            data.id,
             filename,
             compress(content.encode()),
             i + 1
         ))
 
-
     async with app.ctx.pool.acquire() as conn:
         # Delete the existing files
-        await conn.execute("DELETE FROM files WHERE id = ?", data["id"])
+        await conn.execute("DELETE FROM files WHERE id = ?", data.id)
 
         # Add back the new files
         await conn.executemany(
             "INSERT INTO files (id, filename, content, position) VALUES (?, ?, ?, ?)",
             args_for_database
         )
-    
-    return success
