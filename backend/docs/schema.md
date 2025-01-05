@@ -38,6 +38,12 @@ CREATE TABLE files (
     filename TEXT,
     content BLOB NOT NULL,
     filepos INT NOT NULL DEFAULT 1
+    PRIMARY KEY (id, filepos),
+    
+    FOREIGN KEY (id)
+    REFERENCES pastes (id)
+        ON DELETE CASCADE -- Deleting an entry from the pastes
+                          -- table removes all associated files.
 );
 ```
 
