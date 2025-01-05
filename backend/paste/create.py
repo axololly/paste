@@ -1,48 +1,41 @@
-import shortuuid
+import shortuuid, re
 from datetime import datetime as dt, timedelta as td
 from json import JSONDecodeError
+from sanic.exceptions import BadRequest, SanicException
 from sanic.request import Request
-from ._types import CountRow, CreateRequest, CreateSuccess, Reply
-from utils import error_400, format_file_size, http_reply, MyAPI
+from sanic.response import JSONResponse, json as to_json
+from ._types import CountRow, CreateRequest, CreateResponse
+from utils import format_file_size, MyAPI
 from zlib import compress
+
+# URL regex that's used to extract the domain name
+# from the `url` attribute on `request`.
+# Group 1 is the domain and group 2 is the route.
+url_regex = re.compile(r"(https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}(?:\:\d{4})?)\b([-a-zA-Z0-9()@:%_\+.~#?&\/\/=]*)")
 
 async def create_new_paste(
     app: MyAPI,
     request: Request
-) -> CreateSuccess | Reply:
+) -> JSONResponse:
     """
-    Create a new paste in the database from a `Request` with a
-    JSON document in the format of the following:
-
-    ```json
-    {
-      "files": [
-        // [filename, content],
-        // ...
-      ],
-      "keep_for": // number of days between 1 and 30
-    }
-    ```
-
-    Any other keys in the JSON that are not relevant to the
-    operation are discared.
+    ...
     """
     
     # Get the JSON data from the request
     try:
         data: CreateRequest = request.json
     except JSONDecodeError:
-        return error_400("No JSON was given.")
+        raise BadRequest("No JSON was given.")
     
     # Optional JSON key
     if "keep_for" in data:
         # Not an integer - return 400
         if not isinstance(data["keep_for"], (int, float)):
-            return error_400("'keep_for' value is not an integer or decimal.")
+            raise BadRequest("'keep_for' value is not an integer or decimal.")
         
         # Not in range 1-30 inclusive - return 400
         if not 1 <= data["keep_for"] <= 30:
-            return error_400("'keep_for' is not in range 1-30 inclusive.")
+            raise BadRequest("'keep_for' is not in range 1-30 inclusive.")
     
     # Get how many days the paste should be kept for.
     # If not specified, it defaults to the corresponding
@@ -51,7 +44,7 @@ async def create_new_paste(
 
     # Does not match scheme - return 400
     if "files" not in data:
-        return error_400("'files' key missing in JSON.")
+        raise SanicException("'files' key missing in JSON.", 400)
 
     files: list[tuple[str | None, str]] = data["files"]
 
@@ -60,32 +53,38 @@ async def create_new_paste(
     for i, file in enumerate(files):
         # `file` is not a list
         if not isinstance(file, list): # type: ignore
-            return error_400(f"element at index {i} in 'files' list is not a list.")
+            raise BadRequest(f"element at index {i} in 'files' list is not a list.")
         
         # `file` does not have two items in it
         if len(file) != 2:
-            return error_400(f"element at index {i} in 'files' has more or less than 2 items inside.")
+            raise BadRequest(f"element at index {i} in 'files' has more or less than 2 items inside.")
 
         # Deconstruct for easier management
         filename, content = file
 
         # `filename` is not a string or `NoneType`
         if not isinstance(filename, (str, type(None))): # type: ignore
-            return error_400(f"first element at index {i} in 'files' is not a string or NoneType equivalent.")
+            raise BadRequest(f"first element at index {i} in 'files' is not a string or NoneType equivalent.")
 
         # `content` is not a string
         if not isinstance(content, str): # type: ignore
-            return error_400(f"second element at index {i} in 'files' is not a string.")
+            raise BadRequest(f"second element at index {i} in 'files' is not a string.")
         
         if not content:
-            return error_400(f"second element at index {i} in 'files' is an empty string.")
+            raise BadRequest(f"second element at index {i} in 'files' is an empty string.")
 
         total_paste_size += len(content)
 
         # If the file size exceeds what is required, return
         # a 422 (Unprocessable Entity) HTTP status code.
         if total_paste_size > app.ctx.configs.MAX_PASTE_SIZE:
-            return http_reply(422, f"Combined file size after file {i} exceeds maximum limit of {format_file_size(app.ctx.configs.MAX_PASTE_SIZE)} by {format_file_size(total_paste_size - app.ctx.configs.MAX_PASTE_SIZE)}")
+            raise SanicException(
+                f"Combined file size after file {i} exceeds maximum limit " +
+                f"of {format_file_size(app.ctx.configs.MAX_PASTE_SIZE)} by" +
+                f" {format_file_size(total_paste_size - app.ctx.configs.MAX_PASTE_SIZE)}",
+                
+                422
+            )
     
 
     async with app.ctx.pool.acquire() as conn:
@@ -96,8 +95,7 @@ async def create_new_paste(
     # Verify that there's still space available in the database.
     # If there isn't, return a 403 notifying the user.
     if count == app.ctx.configs.MAX_ENTRIES:
-        return http_reply(403, "System is full. Please try again later.")
-
+        raise SanicException("System is full. Please try again later.", 403)
 
     async def get_unique_uuid(*, length: int, column: str) -> str:
         "Get a new UUID with length `length` that hasn't appeared in the `column` column of the database."
@@ -144,13 +142,10 @@ async def create_new_paste(
             ]
         )
     
-    entire_link = request.url
-    current_scope = request.uri_template or ""
-
-    base_url = entire_link.removesuffix(current_scope)
+    base_url = re.sub(url_regex, r'\1', request.url)
     
-    return CreateSuccess(
-        paste_id = paste_id,
-        removal_id = removal_id,
-        removal_link = f"{base_url}/delete/{removal_id}"
-    )
+    return to_json({
+        "paste_id": paste_id,
+        "removal_id": removal_id,
+        "removal_link": f"{base_url}/delete/{removal_id}"
+    })

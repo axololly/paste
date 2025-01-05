@@ -1,22 +1,37 @@
-from ._types import GetSuccess, Reply
+from sanic.exceptions import BadRequest, NotFound
+from ._types import GetResponse
 from typing import overload
-from utils import error_400, error_404, MyAPI
+from utils import MyAPI
 from zlib import decompress
 
-async def get_paste_by_id(app: MyAPI, uuid: str) -> GetSuccess | Reply:
-    "Retrieve a paste in the database from a given `uuid`."
+async def get_paste_by_id(app: MyAPI, uuid: str) -> GetResponse:
+    """
+    Retrieve a paste in the database from a given `uuid`.
+
+    Parameters
+    ----------
+    app: `MyAPI`
+        the instance of the app currently running right now.
+    uuid: `str`
+        the UUID of the paste to retrieve.
+
+    Returns
+    -------
+    `GetResponse`
+        the resulting response.
+    """
 
     if len(uuid) < app.ctx.configs.PASTE_ID_LENGTH:
-        return error_400("Invalid UUID.")
+        raise BadRequest("Invalid UUID.")
 
     async with app.ctx.pool.acquire() as conn:
         req = await conn.execute("SELECT filename, content FROM files WHERE id = ?", uuid)
         rows = await req.fetchall()
     
     if not rows:
-        return error_404(f"No paste was found with the ID '{uuid}'.")
+        raise NotFound(f"No paste was found with the ID '{uuid}'.")
 
-    return GetSuccess(
+    return GetResponse(
         files = [
             (row["filename"], decompress(row["content"]).decode())
             for row in rows
@@ -63,10 +78,10 @@ async def get_raw_paste_by_id(app: MyAPI, uuid: str, filepos: int = 0) -> str:
     """
    
     if len(uuid) < app.ctx.configs.PASTE_ID_LENGTH:
-       return "400: Invalid UUID."
+       raise BadRequest("Invalid UUID.")
    
     if filepos < 0:
-        return "400: Invalid file position."
+        raise BadRequest("Invalid file position.")
 
     # Not specified - get all files
     if not filepos:
@@ -75,7 +90,7 @@ async def get_raw_paste_by_id(app: MyAPI, uuid: str, filepos: int = 0) -> str:
             rows = await req.fetchall()
         
         if not rows:
-            return "404: Resource not found."
+            raise NotFound("Resource not found.")
 
         return '\n\n***\n\n***'.join(                   # Separator
             f"[{i}. {row["filename"] or "???"}]" '\n'   # Header
@@ -95,6 +110,6 @@ async def get_raw_paste_by_id(app: MyAPI, uuid: str, filepos: int = 0) -> str:
         row = await req.fetchone()
     
     if not row:
-        return "404: Resource not found."
+        raise NotFound("Resource not found.")
     
     return f"[{row["filename"]}]\n{decompress(row["content"]).decode()}"

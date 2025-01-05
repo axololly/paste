@@ -4,22 +4,8 @@ from asqlite import Pool
 from asyncio import sleep
 from datetime import datetime as dt
 from discord.ext import tasks
-from paste._types import Reply, Success
 from sanic import Sanic
 from typing import overload
-
-# =================================================================================================
-
-def http_reply(status_code: int, message: str) -> Reply:
-    return Reply(
-        status = status_code,
-        message = message or "No message given."
-    )
-
-success: Success = Success()
-
-def error_400(message: str) -> Reply: return http_reply(400, message)
-def error_404(message: str) -> Reply: return http_reply(404, message)
 
 # =================================================================================================
 
@@ -41,7 +27,7 @@ class Config:
 
 class APIContext:
     pool: Pool
-    configs: Config = Config()
+    configs: type[Config]
     loops: 'BackgroundLoops'
 
 class MyAPI(Sanic):
