@@ -9,14 +9,45 @@ from zipfile import ZipFile, ZIP_DEFLATED
 from zlib import decompress
 
 @overload
-async def download_paste_by_id(app: MyAPI, request: Request, paste_id: str) -> HTTPResponse:
+async def download_paste_by_id(app: MyAPI, paste_id: str) -> HTTPResponse:
     "Download all files under the given `paste_id`."
 
 @overload
-async def download_paste_by_id(app: MyAPI, request: Request, paste_id: str, filepos: int) -> HTTPResponse:
+async def download_paste_by_id(app: MyAPI, paste_id: str, filepos: int) -> HTTPResponse:
     "Download a single file at position `filepos` under the given `paste_id`."
 
-async def download_paste_by_id(app: MyAPI, request: Request, paste_id: str, filepos: int = 0) -> HTTPResponse:
+async def download_paste_by_id(app: MyAPI, paste_id: str, filepos: int = 0) -> HTTPResponse:
+    """
+    Download a group of files (as a `.zip`) or a single file
+    (as whatever the extension is) from the database.
+    
+    The `.zip` file is built in memory from database rows
+    and then dispatched through a HTTP response as a file.
+
+    Parameters
+    ----------
+    app: `MyAPI`
+        the app currently running.
+    paste_id: `str`
+        the ID of the paste to download.
+    filepos: `int`
+        the specific file to download. If
+        left out, this gets _all_ files.
+    
+    Returns
+    -------
+    `HTTPResponse`
+        the file containing the requested
+        data to then be download.
+    
+    Raises
+    ------
+    `BadRequest`
+        some arguments were invalid.
+    `NotFound`
+        no paste was found with the given ID.
+    """
+    
     if filepos < 0:
         raise BadRequest("'filepos' cannot be less than zero.")
     
@@ -38,7 +69,9 @@ async def download_paste_by_id(app: MyAPI, request: Request, paste_id: str, file
 
         return raw(
             decompress(row["content"]).decode(),
-            content_type = 'file/txt'
+            headers = {
+                "Content-Disposition": f'attachment; filename="{row["filename"] or f'{paste_id}-{row[filepos]}.txt'}"'
+            }
         )
 
     # ================================================================================================
@@ -62,5 +95,7 @@ async def download_paste_by_id(app: MyAPI, request: Request, paste_id: str, file
     
     return raw(
         buffer.getvalue(),
-        content_type = "file/zip"
+        headers = {
+            "Content-Disposition": f'attachment; filename="{paste_id}.zip"'
+        }
     )

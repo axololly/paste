@@ -32,8 +32,8 @@ async def after_end(app: MyAPI) -> None:
 @app.post("/create/")
 @validate(json = CreateRequest)
 @limiter.limit("6/minute") # type: ignore # 10s per request
-async def app_create_new_paste(request: Request) -> JSONResponse:
-    return await create_new_paste(app, request)
+async def app_create_new_paste(request: Request, body: CreateRequest) -> JSONResponse:
+    return await create_new_paste(app, body, request.url)
 
 
 @app.get("/get/<paste_id>")
@@ -41,39 +41,39 @@ async def app_create_new_paste(request: Request) -> JSONResponse:
 async def app_get_paste_by_id(request: Request, paste_id: str) -> GetResponse:
     return await get_paste_by_id(app, paste_id)
 
-@app.get("/get/raw/<paste_id>")
+@app.get("/raw/<paste_id>")
 @limiter.limit("20/minute") # type: ignore # 3s per request
-async def app_get_raw_paste_by_id(request: Request, paste_id: str) -> str:
+async def app_get_raw_paste_by_id(request: Request, paste_id: str) -> HTTPResponse:
     return await get_raw_paste_by_id(app, paste_id)
 
-@app.get("/get/raw/<paste_id>/<filepos>")
+@app.get("/raw/<paste_id>/<filepos>")
 @limiter.limit("20/minute") # type: ignore # 3s per request
-async def app_get_raw_file_by_id(request: Request, paste_id: str, filepos: int) -> str:
+async def app_get_raw_file_by_id(request: Request, paste_id: str, filepos: int) -> HTTPResponse:
     return await get_raw_paste_by_id(app, paste_id, filepos)
 
 
-@app.delete("/delete/<removal_id>")
+@app.get("/delete/<removal_id>")
 @limiter.limit("10/minute")  # type: ignore # 6s per request
-async def app_delete_paste_by_link(request: Request, removal_id: str) -> None:
+async def app_delete_paste_by_link(request: Request, removal_id: str) -> HTTPResponse:
     return await delete_paste_by_link(app, removal_id)
 
 
 @app.put("/update/")
 @validate(json = UpdateRequest)
 @limiter.limit("3/minute") # type: ignore
-async def app_update_existing_paste(request: Request) -> None:
-    return await update_existing_paste(app, request)
+async def app_update_existing_paste(request: Request, body: UpdateRequest) -> None:
+    return await update_existing_paste(app, body)
 
 
 @app.get("/download/<paste_id>")
 @limiter.limit("2/minute") # type: ignore
 async def app_download_paste_by_id(request: Request, paste_id: str) -> HTTPResponse:
-    return await download_paste_by_id(app, request, paste_id)
+    return await download_paste_by_id(app, paste_id)
 
 @app.get("/download/<paste_id>/<filepos>")
 @limiter.limit("2/minute") # type: ignore
 async def app_download_single_paste_by_id(request: Request, paste_id: str, filepos: int) -> HTTPResponse:
-    return await download_paste_by_id(app, request, paste_id, filepos)
+    return await download_paste_by_id(app, paste_id, filepos)
 
 
 if __name__ == '__main__':

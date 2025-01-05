@@ -11,46 +11,49 @@ from zlib import compress
 # URL regex that's used to extract the domain name
 # from the `url` attribute on `request`.
 # Group 1 is the domain and group 2 is the route.
-url_regex = re.compile(r"(https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}(?:\:\d{4})?)\b([-a-zA-Z0-9()@:%_\+.~#?&\/\/=]*)")
+url_regex = re.compile(r"(https?:\/\/[\w.]*?(\:\d{4})?)\/")
 
 async def create_new_paste(
     app: MyAPI,
-    request: Request
+    data: CreateRequest,
+    request_url: str
 ) -> JSONResponse:
     """
-    ...
+    Create a new paste in the database with the given `data`.
+
+    This takes a list of two-long sublists that start with an
+    optional filename and finish with a required code sample
+    to upload onto the database.
+
+    Parameters
+    ----------
+    app: `FastAPI`
+        the app currently running.
+    data: `CreateRequest`
+        the data the user submitted for upload.
+    request_url: `str`
+        the complete URL the request was made from. This
+        is necessary for generating a delete link.
+    
+    Returns
+    -------
+    `JSONResponse`
+        a JSON document containing the ID of the created
+        paste and its removal link.
+    
+    Raises
+    ------
+    `BadRequest`
+        the request did not match the designated schema.
+    `SanicException`
+        403: database reached allowed maximum; no space left.
+        422: file size exceeded allowed maximum.
     """
-    
-    # Get the JSON data from the request
-    try:
-        data: CreateRequest = request.json
-    except JSONDecodeError:
-        raise BadRequest("No JSON was given.")
-    
-    # Optional JSON key
-    if "keep_for" in data:
-        # Not an integer - return 400
-        if not isinstance(data["keep_for"], (int, float)):
-            raise BadRequest("'keep_for' value is not an integer or decimal.")
-        
-        # Not in range 1-30 inclusive - return 400
-        if not 1 <= data["keep_for"] <= 30:
-            raise BadRequest("'keep_for' is not in range 1-30 inclusive.")
-    
-    # Get how many days the paste should be kept for.
-    # If not specified, it defaults to the corresponding
-    # attribute on the `Config` class.
-    days_before_expiration: int = data.pop("keep_for", app.ctx.configs.DEFAULT_EXPIRATION_IN_DAYS) # type: ignore
-
-    # Does not match scheme - return 400
-    if "files" not in data:
-        raise SanicException("'files' key missing in JSON.", 400)
-
-    files: list[tuple[str | None, str]] = data["files"]
 
     total_paste_size = 0
     
-    for i, file in enumerate(files):
+    # TODO: see whether this section of code is necessary or not.
+    for i, file in enumerate(data.files):
         # `file` is not a list
         if not isinstance(file, list): # type: ignore
             raise BadRequest(f"element at index {i} in 'files' list is not a list.")
@@ -124,7 +127,7 @@ async def create_new_paste(
         column = "removal_id"
     )
 
-    expiration = int((dt.now() + td(days = days_before_expiration)).timestamp())
+    expiration = int((dt.now() + td(days = data.keep_for)).timestamp())
 
     async with app.ctx.pool.acquire() as conn:
         # Add to the `pastes` table
@@ -137,15 +140,14 @@ async def create_new_paste(
         await conn.executemany(
             "INSERT INTO files (id, filename, content, position) VALUES (?, ?, ?, ?)",
             [
-                (paste_id, filename, compress(content.encode()), position) # type: ignore (content is always 'str')
-                for position, (filename, content) in enumerate(files, start = 1)
+                (paste_id, filename, compress(content.encode()), position)
+                for position, (filename, content) in enumerate(data.files, start = 1)
             ]
         )
     
-    base_url = re.sub(url_regex, r'\1', request.url)
+    base_url = re.sub(url_regex, r'\1', request_url)
     
     return to_json({
         "paste_id": paste_id,
-        "removal_id": removal_id,
         "removal_link": f"{base_url}/delete/{removal_id}"
     })

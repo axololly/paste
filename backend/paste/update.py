@@ -5,35 +5,29 @@ from ._types import UpdateRequest
 from utils import format_file_size, MyAPI
 from zlib import compress
 
-async def update_existing_paste(app: MyAPI, request: Request) -> None:
+async def update_existing_paste(app: MyAPI, data: UpdateRequest) -> None:
     """
-    Update an existing paste through the JSON of a `request`.
+    Update an existing paste in the database.
 
-    This does not refresh the time before deletion.
+    This uses a similar JSON document structure
+    to the `/create/` endpoint, providing
+    intuitive usage.
 
-    Format
+    Parameters
+    ----------
+    app: `MyAPI`
+        the app currently running.
+    data: `UpdateRequest`
+        the data relevant to the operation.
+    
+    Raises
     ------
-    ```json
-    {
-        "id": // The UUID required
-        "files": // The new content to add - list[list[int, str]]
-    }
-    ```
+    `BadRequest`
+        some arguments were invalid.
+    `NotFound`
+        the given paste ID could not
+        be found in the database.
     """
-    
-    try:
-        data: UpdateRequest = request.json
-    
-    # No JSON was given.
-    except JSONDecodeError:
-        raise BadRequest("No JSON was given.")
-
-    if set(data.keys()) != {"id", "files"}:
-        raise BadRequest("Invalid keys found in JSON.")
-
-
-    if not isinstance(data["id"], str): # type: ignore
-        raise BadRequest("'id' value is not a string.")
     
     async with app.ctx.pool.acquire() as conn:
         req = await conn.execute("SELECT expiration, removal_id FROM pastes WHERE id = ?", data["id"])
@@ -42,14 +36,11 @@ async def update_existing_paste(app: MyAPI, request: Request) -> None:
     if not paste_data_row:
         raise NotFound(f"No paste was found with the ID '{data["id"]}'.")
 
-
-    if not isinstance(data["files"], list): # type: ignore
-        raise BadRequest("'files' value is not a list.")
-
     total_paste_size = 0
 
     args_for_database: list[tuple[str, str, bytes, int]] = []
 
+    # TODO: evaluate whether or not this is needed.
     for i, file in enumerate(data["files"]):
         if not isinstance(file, list): # type: ignore
             raise BadRequest(f"item at index {i} is not a list.")
