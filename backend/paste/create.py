@@ -50,44 +50,18 @@ async def create_new_paste(
         422: file size exceeded allowed maximum.
     """
 
-    total_paste_size = 0
-    
-    # TODO: see whether this section of code is necessary or not.
-    for i, file in enumerate(data.files):
-        # `file` is not a list
-        if not isinstance(file, list): # type: ignore
-            raise BadRequest(f"element at index {i} in 'files' list is not a list.")
-        
-        # `file` does not have two items in it
-        if len(file) != 2:
-            raise BadRequest(f"element at index {i} in 'files' has more or less than 2 items inside.")
+    total_paste_size = sum([len(content) for _, content in data.files])
 
-        # Deconstruct for easier management
-        filename, content = file
-
-        # `filename` is not a string or `NoneType`
-        if not isinstance(filename, (str, type(None))): # type: ignore
-            raise BadRequest(f"first element at index {i} in 'files' is not a string or NoneType equivalent.")
-
-        # `content` is not a string
-        if not isinstance(content, str): # type: ignore
-            raise BadRequest(f"second element at index {i} in 'files' is not a string.")
-        
-        if not content:
-            raise BadRequest(f"second element at index {i} in 'files' is an empty string.")
-
-        total_paste_size += len(content)
-
-        # If the file size exceeds what is required, return
-        # a 422 (Unprocessable Entity) HTTP status code.
-        if total_paste_size > app.ctx.configs.MAX_PASTE_SIZE:
-            raise SanicException(
-                f"Combined file size after file {i} exceeds maximum limit " +
-                f"of {format_file_size(app.ctx.configs.MAX_PASTE_SIZE)} by" +
-                f" {format_file_size(total_paste_size - app.ctx.configs.MAX_PASTE_SIZE)}",
+    # If the paste size exceeds what is required, return
+    # a 422 (Unprocessable Entity) HTTP status code.
+    if total_paste_size > app.ctx.configs.MAX_PASTE_SIZE:
+        raise SanicException(
+            f"Combined file size exceeds maximum limit of" +
+            f" {format_file_size(app.ctx.configs.MAX_PASTE_SIZE)} by" +
+            f" {format_file_size(total_paste_size - app.ctx.configs.MAX_PASTE_SIZE)}",
                 
-                422
-            )
+            422
+        )
     
 
     async with app.ctx.pool.acquire() as conn:

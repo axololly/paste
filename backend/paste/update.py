@@ -1,6 +1,4 @@
-from json import JSONDecodeError
-from sanic.exceptions import BadRequest, NotFound, SanicException
-from sanic.request import Request
+from sanic.exceptions import NotFound, SanicException
 from ._types import UpdateRequest
 from utils import format_file_size, MyAPI
 from zlib import compress
@@ -30,34 +28,20 @@ async def update_existing_paste(app: MyAPI, data: UpdateRequest) -> None:
     """
     
     async with app.ctx.pool.acquire() as conn:
-        req = await conn.execute("SELECT expiration, removal_id FROM pastes WHERE id = ?", data["id"])
+        req = await conn.execute("SELECT expiration, removal_id FROM pastes WHERE id = ?", data.id)
         paste_data_row = await req.fetchone()
     
     if not paste_data_row:
-        raise NotFound(f"No paste was found with the ID '{data["id"]}'.")
+        raise NotFound(f"No paste was found with the ID '{data.id}'.")
 
+    args_for_database: list[tuple[str, str | None, bytes, int]] = []
     total_paste_size = 0
 
-    args_for_database: list[tuple[str, str, bytes, int]] = []
-
-    # TODO: evaluate whether or not this is needed.
-    for i, file in enumerate(data["files"]):
-        if not isinstance(file, list): # type: ignore
-            raise BadRequest(f"item at index {i} is not a list.")
-        
-        if len(file) != 2:
-            raise BadRequest(f"item at index {i} does not contain two items.")
-
-        filename, content = file
-
-        if not isinstance(filename, str):
-            raise BadRequest(f"item 0 at index {i} is not a string.")
-        
-        if not isinstance(content, str): # type: ignore
-            raise BadRequest(f"item 1 at index {i} is not a string.")
-        
+    for i, (filename, content) in enumerate(data.files):
         total_paste_size += len(content)
 
+        # If the paste size exceeds what is required, return
+        # a 422 (Unprocessable Entity) HTTP status code.
         if total_paste_size > app.ctx.configs.MAX_PASTE_SIZE:
             raise SanicException(
                 f"Combined file size after file {i} exceeds maximum limit "
@@ -68,16 +52,15 @@ async def update_existing_paste(app: MyAPI, data: UpdateRequest) -> None:
             )
         
         args_for_database.append((
-            data["id"],
+            data.id,
             filename,
             compress(content.encode()),
             i + 1
         ))
 
-
     async with app.ctx.pool.acquire() as conn:
         # Delete the existing files
-        await conn.execute("DELETE FROM files WHERE id = ?", data["id"])
+        await conn.execute("DELETE FROM files WHERE id = ?", data.id)
 
         # Add back the new files
         await conn.executemany(
