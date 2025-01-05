@@ -62,7 +62,6 @@ async def create_new_paste(
                 
             422
         )
-    
 
     async with app.ctx.pool.acquire() as conn:
         req = await conn.execute("SELECT COUNT(*) AS 'count' FROM pastes")
